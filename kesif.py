@@ -17,8 +17,8 @@ nmap_cmd = ["nmap", "-sV", "-T4", "-F", target]
 nmap_res = subprocess.run(nmap_cmd, capture_output=True, text=True)
 nmap_out = nmap_res.stdout
 
-# Acik portlari ve servisleri yakalama (ornek: 80/tcp open http)
-open_services = re.findall(r"(\d+)/tcp\s+open\s+([\w\-\?]+)", nmap_out)
+# Acik portlari ve servisleri yakalama (ornek: 80/tcp open http, 8443/tcp open ssl/http)
+open_services = re.findall(r"(\d+)/tcp\s+open\s+(\S+)", nmap_out)
 
 print(f"[+] {len(open_services)} adet açık port bulundu.")
 for port, srv in open_services:
@@ -28,20 +28,23 @@ extra_findings = ""
 
 # 2. Servise gore otomatik aksiyon alma
 for port, srv in open_services:
-    # Web servisi yakalanirsa
-    if srv in ["http", "https", "http-proxy"] or port in ["80", "443", "8080"]:
-        proto = "https" if port == "443" else "http"
+    # Web servisi yakalanirsa (http, https, http-proxy, ssl/http vb.)
+    if "http" in srv or port in ["80", "443", "8080"]:
+        proto = "https" if (port == "443" or "ssl" in srv or "https" in srv) else "http"
         url = f"{proto}://{target}:{port}"
-        
+
         print(f"\n[*] Web servisi tespit edildi ({url}). WhatWeb ve dizin taraması başlatılıyor...")
-        
+
         # Whatweb
-        ww_res = subprocess.run(["whatweb", url], capture_output=True, text=True)
-        extra_findings += f"\n--- WHATWEB ({url}) ---\n" + ww_res.stdout
-        
-        # Hizli gobuster (kali'deki default wordlist ile)
+        try:
+            ww_res = subprocess.run(["whatweb", url], capture_output=True, text=True, timeout=60)
+            extra_findings += f"\n--- WHATWEB ({url}) ---\n" + ww_res.stdout
+        except subprocess.TimeoutExpired:
+            extra_findings += f"\n--- WHATWEB ({url}) ---\nZaman aşımı (60s).\n"
+
+        # Hizli gobuster (kali'deki default wordlist ile, -k: self-signed sertifikalari kabul et)
         wl = "/usr/share/wordlists/dirb/common.txt"
-        gb_cmd = ["gobuster", "dir", "-u", url, "-w", wl, "-q", "-t", "25", "--no-error"]
+        gb_cmd = ["gobuster", "dir", "-u", url, "-w", wl, "-k", "-q", "-t", "25", "--no-error"]
         try:
             gb_res = subprocess.run(gb_cmd, capture_output=True, text=True, timeout=60)
             extra_findings += f"\n--- GOBUSTER ({url}) ---\n" + (gb_res.stdout if gb_res.stdout else "Dizin bulunamadı.\n")
